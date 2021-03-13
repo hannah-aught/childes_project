@@ -61,8 +61,17 @@ def get_tags(text):
 # Tokenize the child's speech
 # @text: the file contents, split into lines
 # @return: the tokens for each child's speech
-def get_tokens(text):
-    pass
+def get_tokens(line):
+    pattern1 = re.compile(r'\[.*\]')
+    pattern2 = re.compile(r'\x15+[0-9]+_[0-9]+\x15')
+    pattern3 = re.compile(r'\*CHI[0-9]?:\t')
+
+    line = re.sub(pattern1, '', line)
+    line = re.sub(pattern2, '', line)
+    line = re.sub(pattern3, '', line)
+
+    return line.split()
+
 
 #%%
 # Get the types used by the child in a transcript
