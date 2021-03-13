@@ -37,7 +37,8 @@ def get_target_participants(text):
 # get the development stage for the transcript using the file name
 # @file_name: the file name (which is the child's age)
 # @return: the development stage
-def get_stage(file_name):
+def get_stage(file_path):
+    file_name = file_path.split('/')[-1]
     # The file name can only begin with 01, 02, or 03 in our data
     # if it's 1, they're a stage 1 child
     if file_name[:2] == '01':
@@ -95,7 +96,7 @@ def get_stats():
             child_class = path.split('/')[2]
             data = f.read()
             participants = get_target_participants(data)
-            stage = get_stage(data)
+            stage = get_stage(path)
             tokens = get_tokens(data)
             types = get_types(data)
             tags = get_tags(data)
