@@ -4,24 +4,22 @@ import glob
 import os
 import json
 import re
-from collections import defaultdict
+from collections import defaultdict, Counter
 import seaborn as sns
 import pandas as pd
 nltk.download('punkt')
 
 #%%
-PATHS = glob.glob('./data/*/*/*cha')
+PATHS = glob.glob('./data/*/*/*.cha')
+PATHS.sort()
 OUTPUT_DIR = './output/'
-BILINGUAL_DIR = OUTPUT_DIR + 'bilingual/'
-MONOLINGUAL_DIR = OUTPUT_DIR + 'monolingual/'
-BILINGUAL_OUT = BILINGUAL_DIR + 'bilingual_data.json'
-MONOLINGUAL_OUT = MONOLINGUAL_DIR + 'monolingual_data.json'
+OUTPUT_PATH = OUTPUT_DIR + 'language_data.csv'
 PLOTS_DIR = OUTPUT_DIR + 'plots/'
 
 #%%
 # function to get the participants from a transcript file
 # @text: the text from the file, NOT split by lines
-# @return: an array of tuples, each containing the name of the child,
+# @return: a list of tuples, each containing the name of the child,
 # and the corresponding line label used in the transcript
 def get_target_participants(text):
     participants = []
@@ -50,45 +48,98 @@ def get_stage(file_path):
     else:
         return 5
 
+
+#%%
+# Function to get the lines with POS tags for an utterance
+# @lines: the transcript split by newline
+# @i: the first line the child is speaking on for this utterance
+# @return: a list of the lines containing tags for the utterance
+def get_tag_lines(lines, i):
+    tag_lines = []
+    
+    for j, line in enumerate(lines[i+1:]):
+        if len(line) >= 1 and line[0] == '*':
+            break
+
+        if '%mor' in line:
+            tag_lines.append(line)
+
+            for tag_line in lines[i+j+2:]:
+                if tag_line[0] == '%' or tag_line == '*':
+                    break
+
+                tag_lines.append(tag_line)
+    
+    return tag_lines
+
 #%%
 # Get the tags 
 # @text: the file contents, split into lines
-# @return: the tags for each child's speech
-def get_tags(text):
-    pass
+# @return: the tags for each child's utterance
+def get_tags(lines):
+    tags = []
+    pattern = re.compile(r'(%mor:\t|\|[^\s~]+\s*|:\w+|~|\+\.+)')
+
+    for line in lines:
+        tags += [x for x in re.sub(pattern, ' ', line).split() if x.isalpha()]
+
+    return tags
 
 #%%
-# Tokenize the child's speech
-# @text: the file contents, split into lines
-# @return: the tokens for each child's speech
-def get_tokens(line):
-    pattern1 = re.compile(r'\[.*\]')
-    pattern2 = re.compile(r'\x15+[0-9]+_[0-9]+\x15')
-    pattern3 = re.compile(r'\*CHI[0-9]?:\t')
+# Function to get the errors noted in for an utterance
+# @lines: the transcript split by newline
+# @i: the first index of the child talking
+# @return: a list of tuples containing the errors and fixes in the form (error, fix)
+def get_errors(lines, i):
 
-    line = re.sub(pattern1, '', line)
-    line = re.sub(pattern2, '', line)
-    line = re.sub(pattern3, '', line)
+    for line in lines[i+1:]:
+        if len(line) >= 1 and line[0] == '*':
+            break
 
-    return line.split()
+        if '%err' in line:
+            errors = line[6:].split(';')
+
+            if len(errors) >= 2:
+                return [(x.split('=')[0].strip(), x.split('=')[1].strip()) for x in errors]
 
 
-#%%
-# Get the types used by the child in a transcript
-# @text: the file contents, split into lines
-# @return: the types for each transcript
-# TODO: should this be called over each stage rather than over each 
-# transcript individually? Doing it over each transcript would mean
-# that we're collecting the average number of types used per interaction
-def get_types(text):
-    pass
+    return []
 
 #%%
-# Get the average length of utterance for a transcript
-# @text: a transcript, split into lines
-# returns the mean utterance length for the child's speech in the transcript
-def get_mean_utterance_length(text):
-    pass
+# Function to get the lines that include the child talking (one utterance)
+# Needed because some utterances span multiple transcript lines
+# @lines: the transcript split by newline
+# @i: the first index of the child talking
+# @return: a list of transcript lines making up the utterance
+def get_token_lines(lines, i):
+    token_lines = [lines[i]]
+
+    for line in lines[i+1:]:
+        if len(line) >= 1 and (line[0] == '%' or line[0] == '*'):
+            break
+        else:
+            token_lines.append(line)
+    
+    return token_lines
+
+#%%
+# Tokenize one utterance of the child's speech
+# @line: a list containing the utterance
+# @errors: a list of tuples containing the errors and corresponding fixes for this utterance
+# @return: the tokens for this line, cleaned and tokenized by NLTK
+def get_tokens(lines, errors):
+    pattern = re.compile(r'(\*CHI[0-9]?:|\[[^\[\]]*\]|\([^\[\)]*\)|\x15[0-9]+_[0-9]+\x15|[<>]|\+\.+)')
+    tokenized_lines = []
+
+    for line in lines:
+        cleaned_line = re.sub(pattern, '', line).strip()
+        
+        for error in errors:
+            cleaned_line = re.sub(error[0], error[1], cleaned_line)
+        
+        tokenized_lines += [x for x in nltk.word_tokenize(cleaned_line) if x.isalpha()]
+
+    return tokenized_lines
 
 #%%
 # Wrapper function to get the stats for each monolingual and bilingual transcript
@@ -101,30 +152,46 @@ def get_stats():
     stats = []
 
     for path in PATHS:
+
         with open(path, 'r') as f:
             child_class = path.split('/')[2]
             data = f.read()
+            lines = data.split('\n')
             participants = get_target_participants(data)
-            stage = get_stage(path)
-            tokens = get_tokens(data)
-            types = get_types(data)
-            tags = get_tags(data)
-            mean_utterance_length = get_mean_utterance_length(data)
 
-        for participant in participants:
-            stats.append((child_class,
-                          participant,
-                          stage,
-                          tokens,
-                          types,
-                          tags,
-                          len(tokens),
-                          len(types),
-                          len(tags),
-                          mean_utterance_length))
+            for participant in participants:
+                tokens = []
+                tags = []
+                num_tokens = 0
+                num_utterances = 0
 
-        df = pd.DataFrame(stats, columns=['child_class', 'name', 'stage', 'tokens', 'types', 'tags', 'num_tokens', 'num_types', 'num_tags', 'mean_utterance_length'])
-        return df
+                for i, line in enumerate(lines):
+                    if f'*{participant[0]}:' in line:
+                        tag_lines = get_tag_lines(lines, i)
+                        tags += get_tags(tag_lines)
+
+                        errors = get_errors(lines, i)
+                        
+                        token_lines = get_token_lines(lines, i)
+                        tokens += get_tokens(token_lines, errors)
+
+                        num_utterances += 1
+
+                stage = get_stage(path)
+
+                stats.append((path.split('/')[-1],
+                              child_class,
+                              participant,
+                              stage,
+                              tokens,
+                              Counter(tokens),
+                              Counter(tags),
+                              len(tokens),
+                              len(tags),
+                              len(tokens)/num_utterances))
+
+    df = pd.DataFrame(stats, columns=['file_name','child_class', 'name', 'stage', 'tokens', 'types', 'tags', 'num_tokens', 'num_tags', 'mean_utterance_length'])
+    return df
 
 #%%
 # function to generate the development curves from the collected data
@@ -154,29 +221,17 @@ def write_data(data, path):
 # if they don't already exist
 def make_output_dirs():
     # check if each dir exists, then make it if not
-    if not os.path.exists(MONOLINGUAL_DIR):
-        os.makedirs(MONOLINGUAL_DIR)
-    if not os.path.exists(BILINGUAL_DIR):
-        os.makedirs(BILINGUAL_DIR)
+    if not os.path.exists(OUTPUT_DIR):
+        os.makedirs(OUTPUT_DIR)
 
-
-#%%
-make_output_dirs()
-
-#%%
-df = get_stats()
 
 #%%
 def main():
     make_output_dirs()
 
-    monolingual_df = get_stats(MONOLINGUAL_PATHS, tag='monolingual')
-    bilingual_df = get_stats(BILINGUAL_PATHS, tag='bilingual')
+    df = get_stats()
 
-    generate_plots(monolingual_stats, bilingual_stats, PLOTS_DIR)
-
-    write_data(monolingual_stats, MONOLINGUAL_OUT)
-    write_data(bilingual_stats, BILINGUAL_OUT)
+    df.to_csv(OUTPUT_PATH)
 
 if __name__ == "__main__":
     main()
