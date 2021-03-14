@@ -4,6 +4,7 @@ import glob
 import os
 import re
 from collections import defaultdict, Counter
+from scipy import stats
 import seaborn as sns
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -192,7 +193,7 @@ def get_stats():
                               len(Counter(tags)),
                               len(tokens)/num_utterances))
 
-    df = pd.DataFrame(stats, columns=['file_name','child_class', 'child_name', 'stage', 'tokens','types', 'tags', 'num_tokens', 'num_types', 'num_tags', 'mean_utterance_length'])
+    df = pd.DataFrame(stats, columns=['file_name','child_class', 'child_name', 'stage', 'tokens','types', 'tags', 'num_tokens', 'num_types', 'num_tags', 'mlu'])
     return df
 
 #%%
@@ -209,7 +210,7 @@ def make_plot(df, y, ax, title, ylabel):
 # @path: the path to write the plots to
 def generate_plots(df):
     f, axs = plt.subplots(2, 2, sharex='row')
-    df_cols = ['num_tokens', 'num_tags', 'num_types', 'mean_utterance_length']
+    df_cols = ['num_tokens', 'num_tags', 'num_types', 'mlu']
     ylabels = ['Vocabulary Size', 'Number of Tag Types', 'Number of Tokens', 'Mean Utterance Length']
 
     for i in range(4):
@@ -243,11 +244,30 @@ def aggregate_along_col(df, aggregate_col, col_name):
 def get_aggregate_data(df):
     adf = df.drop(columns=['file_name','tokens','num_types','num_tags'], inplace=False)
     adf = adf.groupby(['child_class','child_name','stage'])
-    adf = adf.agg({'types':'sum','tags':'sum','num_tokens':'sum','mean_utterance_length':'mean'})    
+    adf = adf.agg({'types':'sum','tags':'sum','num_tokens':'sum','mlu':'mean'})    
     adf['num_tags'] = adf['tags'].apply(len)
     adf['num_types'] = adf['types'].apply(len)
     adf.reset_index(inplace=True)
     return adf
+
+#%%
+def test_significance(df):
+    statistics = ['num_tokens', 'num_types', 'num_tags', 'mlu']
+    stages = [1, 3, 5]
+    t_tests = []
+    bi_df = df[df['child_class'] == 'Bilingual']
+    mono_df = df[df['child_class'] == 'Monolingual']
+    
+    for stat in statistics:
+        for stage in stages:
+            bi_data = bi_df[bi_df['stage'] == stage][stat]
+            mono_data = mono_df[mono_df['stage'] == stage][stat]
+            t_stat, p_val = stats.ttest_ind(bi_data, mono_data)
+            t_tests.append((stat, stage, t_stat, p_val))
+    
+    test_df = pd.DataFrame(t_tests, columns=['statistic', 'stage', 't-statistic', 'p-val'])
+    return test_df
+        
 
 #%%
 # Function to make the output directories for monolingual and bilingual data
@@ -263,22 +283,24 @@ def main():
     make_output_dirs()
 
     df = get_stats()
-    aggregate_data = get_aggregate_data(df)
-    generate_plots(aggregate_data)
+    aggregated_data = get_aggregate_data(df)
+    significance_df = test_significance(df)
+    generate_plots(aggregated_data)
 
     vocab_df = aggregate_along_col(df, 'num_types', 'Vocab Size')
     tag_df = aggregate_along_col(df, 'num_tags', 'POS')
     token_df = aggregate_along_col(df, 'num_tokens', 'Tokens')
-    mlu_df = aggregate_along_col(df, 'mean_utterance_length', 'Utterance Length')
+    mlu_df = aggregate_along_col(df, 'mlu', 'Utterance Length')
 
     vocab_df.to_latex(TABLE_DIR + 'vocab.tex')
     tag_df.to_latex(TABLE_DIR + 'tags.tex')
     token_df.to_latex(TABLE_DIR + 'tokens.tex')
     mlu_df.to_latex(TABLE_DIR + 'mlu.tex')
 
-    df.to_csv(OUTPUT_PATH)
+    df.to_csv(OUTPUT_DIR + 'language_data.csv')
+    aggregated_data.to_csv(OUTPUT_DIR + 'aggregated_language_data.csv')
+    significance_df.to_csv(OUTPUT_DIR + 'significance_tests.csv')
 
 if __name__ == "__main__":
     main()
-
 # %%
