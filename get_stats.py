@@ -2,11 +2,11 @@
 import nltk
 import glob
 import os
-import json
 import re
 from collections import defaultdict, Counter
 import seaborn as sns
 import pandas as pd
+import matplotlib.pyplot as plt
 nltk.download('punkt')
 
 #%%
@@ -15,6 +15,7 @@ PATHS.sort()
 OUTPUT_DIR = './output/'
 OUTPUT_PATH = OUTPUT_DIR + 'language_data.csv'
 PLOTS_DIR = OUTPUT_DIR + 'plots/'
+TABLE_DIR = OUTPUT_DIR + 'tables/'
 
 #%%
 # function to get the participants from a transcript file
@@ -187,51 +188,97 @@ def get_stats():
                               Counter(tokens),
                               Counter(tags),
                               len(tokens),
-                              len(tags),
+                              len(Counter(tokens)),
+                              len(Counter(tags)),
                               len(tokens)/num_utterances))
 
-    df = pd.DataFrame(stats, columns=['file_name','child_class', 'name', 'stage', 'tokens', 'types', 'tags', 'num_tokens', 'num_tags', 'mean_utterance_length'])
+    df = pd.DataFrame(stats, columns=['file_name','child_class', 'child_name', 'stage', 'tokens','types', 'tags', 'num_tokens', 'num_types', 'num_tags', 'mean_utterance_length'])
     return df
+
+#%%
+def make_plot(df, y, ax, title, ylabel):
+    sns.barplot(data=df, x='stage', y=y, hue='child_class', palette='husl', capsize=0.1, ax=ax)
+    ax.set_ylabel(ylabel)
+    ax.set_xlabel("Brown Development Stage")
+    ax.legend().remove()
+    ax.set_title(title)
 
 #%%
 # function to generate the development curves from the collected data
 # @data: an array of the stat dicts for monolingual and bilingual data
 # @path: the path to write the plots to
-def generate_plots(monolingual_data, bilingual_data, path):
-    mono_types_hist = sns.histplot(monolingual_data, x='stage', y='num_types')
-    bi_types_hist = sns.histplot(bilingual_data, x='stage', y='num_types')
+def generate_plots(df):
+    f, axs = plt.subplots(2, 2, sharex='row')
+    df_cols = ['num_tokens', 'num_tags', 'num_types', 'mean_utterance_length']
+    ylabels = ['Vocabulary Size', 'Number of Tag Types', 'Number of Tokens', 'Mean Utterance Length']
 
-    mono_tokens_hist = sns.histplot(monolingual_data, x='stage', y='num_tokens')
-    bi_tokens_hist = sns.histplot(bilingual_data, x='stage', y='num_tokens')
-
-    mono_utterance_length = sns.histplot(monolingual_data, x='stage', y='mean_utterance_length')
-    bi_utterance_length = sns.histplot(bilingual_data, x='stage', y='mean_utterance_length')
-    pass
+    for i in range(4):
+        make_plot(df, df_cols[i], axs[i//2, i%2], f'Figure 1.{i+1}', ylabels[i])
+    
+    axs[0,0].legend(loc='upper left')
+    f.tight_layout()
+    f.savefig(PLOTS_DIR + 'barplots.png')
 
 #%%
-# Wrapper function to write a stat dict to a file
-# @data: the stat dict
-# @path: the path to the file to write
-def write_data(data, path):
-    with open(path, 'w') as f:
-        json.dump(data, f)
+# Function to aggregate data in the dataframe over a specific column
+# Used to aggregate data for saving/reporting in tables
+# @df: the dataframe
+# @aggregate_col: the name of the column to aggregate on
+# @col_name: the new name for this column
+# @return: a new dataframe with all columns but class, stage, and $aggregate_col dropped
+# and aggregate_col renamed to col_name
+def aggregate_along_col(df, aggregate_col, col_name):
+    aggregated = df[['child_class', 'stage', aggregate_col]].groupby(['child_class', 'stage']).agg({aggregate_col:['mean', 'std']})
+    aggregated.index = aggregated.index.rename(['Language Group', 'Stage'])
+    aggregated.columns = [f'Mean {col_name}', 'Standard Deviation']
+    return aggregated
+
+#%%
+# Function to aggregate the type and tag data across each of the three files per child/stage that we have
+# @df: the dataframe created using get_stats
+# @return: a new dataframe without file_name or tokens and with the following aggregations:
+# types, tags, and num_tokens: summed across the three files per child/stage
+# mean_utterance_length: mean of the mean lengths from the three files per child/stage 
+# num_types, num_tags: the length of the new counter object
+def get_aggregate_data(df):
+    adf = df.drop(columns=['file_name','tokens','num_types','num_tags'], inplace=False)
+    adf = adf.groupby(['child_class','child_name','stage'])
+    adf = adf.agg({'types':'sum','tags':'sum','num_tokens':'sum','mean_utterance_length':'mean'})    
+    adf['num_tags'] = adf['tags'].apply(len)
+    adf['num_types'] = adf['types'].apply(len)
+    adf.reset_index(inplace=True)
+    return adf
 
 #%%
 # Function to make the output directories for monolingual and bilingual data
 # if they don't already exist
+# @return:
 def make_output_dirs():
     # check if each dir exists, then make it if not
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR)
-
+    if not os.path.exists(PLOTS_DIR):
+        os.makedirs(PLOTS_DIR)
 
 #%%
 def main():
     make_output_dirs()
 
     df = get_stats()
+    aggregate_data = get_aggregate_data(df)
+    generate_plots(aggregate_data)
+
+    vocab_df = aggregate_along_col(df, 'num_types', 'Vocab Size')
+    tag_df = aggregate_along_col(df, 'num_tags', 'POS')
+    token_df = aggregate_along_col(df, 'num_tokens', 'Tokens')
+    mlu_df = aggregate_along_col(df, 'mean_utterance_length', 'Utterance Length')
+
+    vocab_df.to_latex(TABLE_DIR + 'vocab.tex')
+    tag_df.to_latex(TABLE_DIR + 'tags.tex')
+    token_df.to_latex(TABLE_DIR + 'tokens.tex')
+    mlu_df.to_latex(TABLE_DIR + 'mlu.tex')
 
     df.to_csv(OUTPUT_PATH)
 
 if __name__ == "__main__":
     main()
+
+# %%
