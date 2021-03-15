@@ -214,7 +214,7 @@ def generate_plots(df):
     ylabels = ['Vocabulary Size', 'Number of Tag Types', 'Number of Tokens', 'Mean Utterance Length']
 
     for i in range(4):
-        make_plot(df, df_cols[i], axs[i//2, i%2], f'Figure 1.{i+1}', ylabels[i])
+        make_plot(df, df_cols[i], axs[i//2, i%2], f'Figure 3.{i+1}', ylabels[i])
     
     axs[0,0].legend(loc='upper left')
     f.tight_layout()
@@ -296,6 +296,7 @@ def main():
     tag_df.to_latex(TABLE_DIR + 'tags.tex')
     token_df.to_latex(TABLE_DIR + 'tokens.tex')
     mlu_df.to_latex(TABLE_DIR + 'mlu.tex')
+    significance_df.to_latex(TABLE_DIR + 'significance.tex')
 
     df.to_csv(OUTPUT_DIR + 'language_data.csv')
     aggregated_data.to_csv(OUTPUT_DIR + 'aggregated_language_data.csv')
